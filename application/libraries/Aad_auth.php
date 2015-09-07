@@ -320,8 +320,7 @@ class Aad_auth {
         $jwt = NULL;
         $lastException = NULL;
 
-        // TODO: cache the keys, this makes a lookup to the STS every time we validate a token
-        $discovery = json_decode(file_get_contents($this->settings['jwks_uri']));
+        $discovery = $this->_get_jwks();
 
         if ($discovery->keys == NULL) {
             throw new DomainException('jwks_uri does not contain the keys attribute');
@@ -361,5 +360,22 @@ class Aad_auth {
         }
 
         return $jwt;
+    }
+
+    /**
+     * Retrieves the JWKs from the cache (and reloads the cache if needed).
+     */
+    private function _get_jwks($force_refesh = FALSE)
+    {
+        $this->CI->load->driver('cache', array('adapter' => 'file', 'backup' => 'dummy'));
+
+        if ($force_refesh || !$jwks = $this->CI->cache->get('aad_auth_jwks'))
+        {
+            log_message('info', 'AAD Auth: Cache miss for JWKs, refreshing cache.');
+            $jwks = json_decode(file_get_contents($this->settings['jwks_uri']));
+            $this->CI->cache->save('aad_auth_jwks', $jwks, 60);
+        }
+
+        return $jwks;
     }
 }
