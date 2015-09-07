@@ -3,14 +3,14 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 class Aad_auth {
 
-    private $_ci;
+    protected $CI;
+
     public $settings;
 
     function __construct()
     {
-        $this->_ci = &get_instance();
-
-        $this->_ci->load->library('session');
+        $this->CI =& get_instance();
+        $this->CI->load->library('session');
 
         $this->_load_settings();
     }
@@ -35,7 +35,7 @@ class Aad_auth {
     {
         $return_to = $return_to === NULL ? $this->_get_current_page() : $return_to;
 
-        $this->_ci->load->helper('url');
+        $this->CI->load->helper('url');
         redirect($this->get_login_url($return_to));
     }
 
@@ -59,7 +59,7 @@ class Aad_auth {
 
         $this->revoke_session();
 
-        $this->_ci->load->helper('url');
+        $this->CI->load->helper('url');
         redirect($this->get_logout_url($return_to));
     }
 
@@ -185,7 +185,7 @@ class Aad_auth {
             $_SESSION['aad_auth_is_logged_in'] = TRUE;
 
             // Redirect back to original page
-            $this->_ci->load->helper('url');
+            $this->CI->load->helper('url');
             redirect($_SESSION['aad_auth_return_to']);
         }
         else
@@ -226,7 +226,7 @@ class Aad_auth {
         // Save the nonce and return_to values to flash data
         $_SESSION['aad_auth_nonce'] = $antiforgery_id;
         $_SESSION['aad_auth_return_to'] = $return_to;
-        $this->_ci->session->mark_as_flash(array('aad_auth_nonce', 'aad_auth_return_to'));
+        $this->CI->session->mark_as_flash(array('aad_auth_nonce', 'aad_auth_return_to'));
 
         $auth_url = $this->settings['authorization_endpoint'] . '?' .
             http_build_query(
@@ -250,9 +250,9 @@ class Aad_auth {
      */
     private function _get_current_page()
     {
-        $this->_ci->load->helper('url');
+        $this->CI->load->helper('url');
         return current_url();
-        //return $this->_ci->router->fetch_class() . '/' . $this->_ci->router->fetch_method();
+        //return $this->CI->router->fetch_class() . '/' . $this->CI->router->fetch_method();
     }
 
     /**
@@ -261,8 +261,8 @@ class Aad_auth {
     private function _load_settings()
     {
         // Load the library's config (into a section, to avoid collisions)
-        $this->_ci->config->load('aad_auth', TRUE);
-        $c = &$this->_ci->config->config['aad_auth'];
+        $this->CI->config->load('aad_auth', TRUE);
+        $c =& $this->CI->config->config['aad_auth'];
 
         // Set the final configuration values
         $this->settings = array(
@@ -272,7 +272,7 @@ class Aad_auth {
             'client_id'                 => $c['client_id'],
             'client_secret'             => $c['client_secret'],
             'resource_uri'              => $c['resource_uri'],
-            'redirect_uri'              => $this->_ci->config->site_url($c['redirect_uri_segment']),
+            'redirect_uri'              => $this->CI->config->site_url($c['redirect_uri_segment']),
         );
     }
 
