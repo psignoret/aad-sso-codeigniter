@@ -1,3 +1,4 @@
+[![Stories in Ready](https://badge.waffle.io/psignoret/aad-sso-codeigniter.png?label=ready&title=Ready)](https://waffle.io/psignoret/aad-sso-codeigniter)
 # aad-sso-codeigniter
 Authentication for a CodeIgniter site using Azure Active Directory
 
