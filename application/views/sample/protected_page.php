@@ -1,7 +1,7 @@
 <html>
     <head>
         <style>
-            body { margin: 10px; font-family: sans-serif;}
+            body { margin: 50px; font-family: sans-serif;}
         </style>
     </head>
     <body>
