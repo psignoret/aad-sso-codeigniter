@@ -48,6 +48,7 @@ class Sample extends CI_Controller {
         {
             $data = array(
                 'user_info' => $this->aad_auth->user_info(),
+                'id_token'  => $this->aad_auth->id_token(),
             );
             $this->load->view('sample/protected_page', $data);
         }
@@ -99,7 +100,7 @@ class Sample extends CI_Controller {
             {
                 // Successful authentication, now use the authentication code to get an Access Token and ID Token
                 echo '<pre>'; var_dump($this->input->get()); echo '</pre>';
-                $this->aad_auth->request_tokens($this->input->get('code'));
+                $this->aad_auth->request_tokens($this->input->get('code'), $this->session->aad_auth_nonce);
             }
         }
     }
