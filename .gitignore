@@ -28,3 +28,11 @@ user_guide_src/cilexer/pycilexer.egg-info/*
 
 # Visual Studio Code settings
 /.settings/
+
+# CodeIgniter session files
+session_data/
+
+# Azure AD SSO for CodeIgniter config file, just keep the template
+application/config/aad_auth.php
+application/config/aad_auth.*.php
+!application/config/aad_auth.template.php
