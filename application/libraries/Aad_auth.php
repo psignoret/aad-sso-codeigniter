@@ -4,14 +4,12 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 class Aad_auth {
 
     protected $CI;
-
-    public $settings;
+    protected $settings;
 
     function __construct()
     {
         $this->CI =& get_instance();
         $this->CI->load->library('session');
-
         $this->_load_settings();
     }
 
@@ -86,7 +84,7 @@ class Aad_auth {
      * @param string    $response_handler_success   The handler to use for a successful token response.
      * @param string    $response_handler_error     The handler to use for error token response.
      */
-    public function request_tokens($code, $response_handler_success = NULL, $response_handler_error = NULL)
+    public function request_tokens($code, $expected_nonce, $response_handler_success = NULL, $response_handler_error = NULL)
     {
         $token_request = http_build_query(
             array(
@@ -131,7 +129,7 @@ class Aad_auth {
         // response will have 'error' defined. Anything else is unexpected.
         if (isset($response['access_token']) && isset($response['token_type']))
         {
-            $this->_handle_token_response_success($response, $response_handler_success);
+            $this->_handle_token_response_success($response, $expected_nonce, $response_handler_success);
         }
         else
         {
@@ -159,24 +157,50 @@ class Aad_auth {
     }
 
     /**
+     * Returns the valida and decoded ID Token if user is signed in, NULL otherwise.
+     */
+    public function id_token()
+    {
+        if ($this->is_logged_in())
+        {
+            return $_SESSION['aad_auth_result']['id_token'];
+        }
+        return NULL;
+    }
+
+    /**
      * Handles an successful response to an access token request.
      *
      * The default handler will mark the session as logged in, place the Access Token and
      * ID Token in the session, and redirect the user-agent to the return_to URL.
+     *
+     * @param   array   $response       The associative array with the successful response to the token request.
+     * @param   string  $expected_nonce The nonce used during the token request.
      */
-    private function _handle_token_response_success($response, $response_handler = NULL)
+    private function _handle_token_response_success($response, $expected_nonce, $response_handler = NULL)
     {
         if ($response_handler === NULL)
         {
-            // TODO: Validate ID Token
+            $id_token = $this->_validate_id_token($response['id_token'], $expected_nonce);
 
-            // TODO: Populate user_info from ID Token
-            $user_info = $response['id_token'];
+            $displayable_id = !empty($id_token->upn)
+                    ? $id_token->upn
+                    : (!empty($id_token->email) ? $id_token->email : '(unknown)');
+
+            $user_info = array(
+                'object_id' => $id_token->oid,
+                'family_name' => $id_token->family_name,
+                'given_name' => $id_token->given_name,
+                'name' => $id_token->name,
+                'unique_name' => $id_token->unique_name,
+                'displayable_id' => $displayable_id,
+            );
 
             $_SESSION['aad_auth_result'] = array(
                 'token_type'    => $response['token_type'],
                 'access_token'  => $response['access_token'],
-                'id_token'      => $response['id_token'],
+                'id_token_jwt'  => $response['id_token'],
+                'id_token'      => $id_token,
                 'refresh_token' => isset($response['refresh_token']) ? $response['refresh_token'] : NULL,
                 'user_info'     => $user_info,
             );
@@ -269,6 +293,7 @@ class Aad_auth {
             'authorization_endpoint'    => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/authorize',
             'token_endpoint'            => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/token',
             'logout_endpoint'           => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/logout',
+            'jwks_uri'                  => $c['authority'] . '/common/discovery/keys',
             'client_id'                 => $c['client_id'],
             'client_secret'             => $c['client_secret'],
             'resource_uri'              => $c['resource_uri'],
@@ -285,5 +310,56 @@ class Aad_auth {
         $data[6] = chr(ord($data[6]) & 0x0f | 0x40); // set version to 0100
         $data[8] = chr(ord($data[8]) & 0x3f | 0x80); // set bits 6-7 to 10
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+    }
+
+    /**
+     * Decodes and validates the ID Token.
+     */
+    private function _validate_id_token($id_token, $expected_nonce)
+    {
+        $jwt = NULL;
+        $lastException = NULL;
+
+        // TODO: cache the keys, this makes a lookup to the STS every time we validate a token
+        $discovery = json_decode(file_get_contents($this->settings['jwks_uri']));
+
+        if ($discovery->keys == NULL) {
+            throw new DomainException('jwks_uri does not contain the keys attribute');
+        }
+
+        foreach ($discovery->keys as $key) {
+            try {
+                if ($key->x5c == NULL) {
+                    throw new DomainException('key does not contain the x5c attribute');
+                }
+
+                $key_der = $key->x5c[0];
+
+                // Per section 4.7 of the current JWK draft [1], the 'x5c' property will be the DER-encoded value
+                // of the X.509 certificate. PHP's openssl functions all require a PEM-encoded value.
+                $key_pem = chunk_split($key_der, 64, "\n");
+                $key_pem = "-----BEGIN CERTIFICATE-----\n".$key_pem."-----END CERTIFICATE-----\n";
+
+                // Load the wrapper library for \Firebase\JWT\JWT
+                $this->CI->load->library('jwt');
+
+                // This throws exception if the id_token cannot be validated.
+                $jwt = $this->CI->jwt->decode($id_token, $key_pem, array('RS256'));
+
+                break;
+            } catch (Exception $e) {
+                $lastException = $e;
+            }
+        }
+
+        if ($jwt === NULL) {
+            throw $lastException;
+        }
+
+        if ($jwt->nonce !== $expected_nonce) {
+            throw new DomainException('Nonce mismatch.');
+        }
+
+        return $jwt;
     }
 }
