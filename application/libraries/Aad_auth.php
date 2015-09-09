@@ -314,56 +314,60 @@ class Aad_auth {
 
     /**
      * Decodes and validates the ID Token.
+     *
+     * @see http://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation  OpenID Connect 3.1.3.7
+     *                                                                              "ID Token Validation"
+     * @return  object  If valid, returns the decoded ID Token as an object.
      */
     private function _validate_id_token($id_token, $expected_nonce)
     {
         $jwt = NULL;
-        $lastException = NULL;
+        $try_again = FALSE;
+        $have_refreshed = FALSE;
 
-        $discovery = $this->_get_jwks();
+        $jwks = $this->_get_jwks();
+        $keys = $this->_get_pem_keys_from_jwk_set($jwks);
 
-        if ($discovery->keys == NULL) {
-            throw new DomainException('jwks_uri does not contain the keys attribute');
-        }
-
-        foreach ($discovery->keys as $key) {
-            try {
-                if ($key->x5c == NULL) {
-                    throw new DomainException('key does not contain the x5c attribute');
-                }
-
-                $key_der = $key->x5c[0];
-
-                // Per section 4.7 of the current JWK draft [1], the 'x5c' property will be the DER-encoded value
-                // of the X.509 certificate. PHP's openssl functions all require a PEM-encoded value.
-                $key_pem = chunk_split($key_der, 64, "\n");
-                $key_pem = "-----BEGIN CERTIFICATE-----\n".$key_pem."-----END CERTIFICATE-----\n";
-
+        do
+        {
+            try
+            {
                 // Load the wrapper library for \Firebase\JWT\JWT
                 $this->CI->load->library('jwt');
 
-                // This throws exception if the id_token cannot be validated.
-                $jwt = $this->CI->jwt->decode($id_token, $key_pem, array('RS256'));
+                // This throws exception if the ID Token cannot be validated.
+                $jwt = $this->CI->jwt->decode($id_token, $keys, array('RS256'));
 
                 break;
-            } catch (Exception $e) {
-                $lastException = $e;
             }
-        }
+            catch (\Firebase\JWT\SignatureInvalidException $e)
+            {
+                if ($have_refreshed === FALSE)
+                {
+                    log_message('info', 'JWT signature validation failed. Refreshing cache and retrying once.');
+                    $discovery = $this->_get_jwks(TRUE);
+                    $have_refreshed = TRUE;
+                    $try_again = TRUE;
+                }
+                else
+                {
+                    log_message('error', 'Signature validation has failed, even with fresh keys.');
+                    throw $e;
+                }
+            }
+        } while($try_again === TRUE);
 
-        if ($jwt === NULL) {
-            throw $lastException;
-        }
+        // TODO: Verify issuer
 
-        if ($jwt->nonce !== $expected_nonce) {
+        if ($jwt->nonce !== $expected_nonce)
+        {
             throw new DomainException('Nonce mismatch.');
         }
-
         return $jwt;
     }
 
     /**
-     * Retrieves the JWKs from the cache (and reloads the cache if needed).
+     * Retrieves the JWK Set from the cache (and reloads the cache if needed).
      */
     private function _get_jwks($force_refesh = FALSE)
     {
@@ -371,11 +375,55 @@ class Aad_auth {
 
         if ($force_refesh || !$jwks = $this->CI->cache->get('aad_auth_jwks'))
         {
-            log_message('info', 'AAD Auth: Cache miss for JWKs, refreshing cache.');
-            $jwks = json_decode(file_get_contents($this->settings['jwks_uri']));
-            $this->CI->cache->save('aad_auth_jwks', $jwks, 60);
-        }
+            $forced = ($force_refesh ? 'TRUE' : 'FALSE');
+            log_message('info', 'Cache miss for JWKs, refreshing cache. Forced: ' . $forced);
 
+            $jwks = json_decode(file_get_contents($this->settings['jwks_uri']));
+
+            // Cache for one day
+            $this->CI->cache->save('aad_auth_jwks', $jwks, (60 * 60 * 24));
+        }
         return $jwks;
+    }
+
+    /**
+     * The JWKs in the JWK set exposed by Azure AD include the 'x5c' parameter, which contains the DER-encoded
+     * value of the X.509 certificate to be used for signature verification. The \Firebase\JWT\JWT methods use
+     * PHP's openssl functions, which require PEM-encoded values. This method takes a JWK Set with 'x5c' values,
+     * and returns an associative array where the key is the 'kid' parameter, and the value is the PEM-encoded
+     * certificate.
+     */
+    private function _get_pem_keys_from_jwk_set($jwk_set)
+    {
+        $pem_keys = array();
+        if (empty($jwk_set->keys))
+        {
+            throw new InvalidArgumentException(
+                'Input JWK set does not contain the \'keys\' parameter, or it is empty');
+        }
+        foreach ($jwk_set->keys as $jwk)
+        {
+            if (empty($jwk->x5c))
+            {
+                throw new InvalidArgumentException('Key does not contain the \'x5c\' parameter.');
+            }
+            if (empty($jwk->kid))
+            {
+                throw new InvalidArgumentException('Key does not contain the \'kid\' parameter.');
+            }
+
+            // TODO: Support chained certificates.
+            $key_der = $jwk->x5c[0];
+
+            // Per section 4.7 of RFC7517, the 'x5c' property will be the DER-encoded value
+            // of the X.509 certificate. PHP's openssl functions all require a PEM-encoded value.
+            $key_pem = chunk_split($key_der, 64, "\n");
+            $key_pem = "-----BEGIN CERTIFICATE-----\n" .
+                        $key_pem .
+                        "-----END CERTIFICATE-----\n";
+
+            $pem_keys[$jwk->kid] = $key_pem;
+        }
+        return $pem_keys;
     }
 }
