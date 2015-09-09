@@ -64,7 +64,7 @@ class Aad_auth {
     public function get_logout_url($return_to = NULL)
     {
         $return_to = $return_to === NULL ? $this->_get_current_page() : $return_to;
-        return $this->settings['logout_endpoint'] . '?post_logout_redirect_uri=' . urlencode($return_to);
+        return $this->settings['end_session_endpoint'] . '?post_logout_redirect_uri=' . urlencode($return_to);
     }
 
 
@@ -292,7 +292,7 @@ class Aad_auth {
         $this->settings = array(
             'authorization_endpoint'    => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/authorize',
             'token_endpoint'            => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/token',
-            'logout_endpoint'           => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/logout',
+            'end_session_endpoint'      => $c['authority'] . '/' . $c['directory_identifier'] . '/oauth2/logout',
             'jwks_uri'                  => $c['authority'] . '/common/discovery/keys',
             'client_id'                 => $c['client_id'],
             'client_secret'             => $c['client_secret'],
